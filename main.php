@@ -275,30 +275,25 @@ function business_reports_page()
     <?php
 }
 
-function get_current_month_sales()
-{
-    global $wpdb;
-
-    // 1. ดึงเวลาปัจจุบันตาม Timezone ของเว็บ (เช่น 2026-04-28 13:45:00)
-    $now = current_time('mysql');
-
-    // 2. หาจุดเริ่มต้นของเดือนนี้ (เช่น 2026-04-01 00:00:00)
-    $start_of_month = date('Y-m-01 00:00:00', strtotime($now));
-
-    $table_name = $wpdb->prefix . 'wc_order_stats';
-
-    // 3. Query โดยระบุสถานะให้ชัดเจน
-    $sales = $wpdb->get_var($wpdb->prepare(
-        "SELECT SUM(total_sales) 
-         FROM $table_name 
-         WHERE date_created >= %s 
-         AND date_created <= %s
-         AND status IN ('wc-processing', 'wc-completed')",
-        $start_of_month,
-        $now
-    ));
-
-    return $sales ? $sales : 0;
+function get_current_month_sales() {
+    // 1. ดึงออเดอร์ทั้งหมดในเดือนนี้
+    $args = [
+        'limit'        => -1,
+        'status'       => ['wc-completed', 'wc-processing'], // เอาแค่ที่จ่ายเงินแล้ว
+        'date_created' => date('Y-m-01') . '...' . date('Y-m-t'), // เดือนปัจจุบัน
+    ];
+    
+    $orders = wc_get_orders($args);
+    
+    $total_sales = 0;
+    
+    foreach ($orders as $order) {
+        // หักยอด Refund ออกให้หมด (ถ้ามี)
+        $refunded_amount = $order->get_total_refunded();
+        $total_sales += ($order->get_total() - $refunded_amount);
+    }
+    
+    return $total_sales;
 }
 
 add_filter('admin_title', function ($admin_title, $title) {
