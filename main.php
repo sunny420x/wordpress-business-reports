@@ -276,24 +276,37 @@ function business_reports_page()
 }
 
 function get_current_month_sales() {
-    // 1. ดึงออเดอร์ทั้งหมดในเดือนนี้
+    // ใช้เวลาตาม Timezone ที่ตั้งไว้ใน WordPress
+    $start_date = wp_date( 'Y-m-01 00:00:00' );
+    $end_date   = wp_date( 'Y-m-t 23:59:59' );
+
     $args = [
         'limit'        => -1,
-        'status'       => ['wc-completed', 'wc-processing'], // เอาแค่ที่จ่ายเงินแล้ว
-        'date_created' => date('Y-m-01') . '...' . date('Y-m-t'), // เดือนปัจจุบัน
+        'type'         => 'shop_order',
+        'status'       => [ 'wc-completed', 'wc-processing' ],
+        'date_created' => $start_date . '...' . $end_date,
+        'return'       => 'objects',
     ];
-    
-    $orders = wc_get_orders($args);
-    
-    $total_sales = 0;
-    
-    foreach ($orders as $order) {
-        // หักยอด Refund ออกให้หมด (ถ้ามี)
-        $refunded_amount = $order->get_total_refunded();
-        $total_sales += ($order->get_total() - $refunded_amount);
+
+    $orders      = wc_get_orders( $args );
+    $total_sales = 0.0;
+
+    foreach ( $orders as $order ) {
+        // ป้องกัน Refund object หรือข้อมูลผิดประเภทหลุดเข้ามา
+        if (
+            ! $order instanceof WC_Order ||
+            $order instanceof WC_Order_Refund
+        ) {
+            continue;
+        }
+
+        $order_total     = (float) $order->get_total();
+        $refunded_amount = (float) $order->get_total_refunded();
+
+        $total_sales += $order_total - $refunded_amount;
     }
-    
-    return $total_sales;
+
+    return max( 0, $total_sales );
 }
 
 add_filter('admin_title', function ($admin_title, $title) {
