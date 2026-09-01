@@ -6,6 +6,8 @@
  * Author: Jirakit Pawnsakunrungrot
  * Author URI: https://www.linkedin.com/in/sunny-jirakit
  * Plugin URI: https://github.com/sunny420x/wordpress-business-reports
+ * GitHub Plugin URI: https://github.com/sunny420x/woocommerce-business-reports
+ * Primary Branch: master
  */
 
 //Deny access from URL.
@@ -142,6 +144,8 @@ function business_reports_settings()
                         <td>
                             <a href="admin.php?page=business_reports_print&snapshot_id=<?= $row->id; ?>"
                                 class="button">ดูรายงานฉบับเต็ม</a>
+                            <a href="<?= esc_url(wp_nonce_url('admin.php?page=business_reports_print&delete_snapshot_id=' . (int) $row->id, 'delete_business_report_snapshot_' . (int) $row->id)); ?>"
+                                class="button">ลบรายงาน</a>
                         </td>
                     </tr>
                 <?php endforeach; ?>
@@ -171,8 +175,60 @@ function business_reports_settings_init()
     register_setting('business_reports_settings_group', 'mobile_best_practices');
     register_setting('business_reports_settings_group', 'mobile_seo');
 }
+function business_report_get_snapshot_data($snapshot_id = null, $report_month = null)
+{
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'business_reports_snapshots';
+
+    if (!empty($snapshot_id)) {
+        $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table_name WHERE id = %d LIMIT 1", absint($snapshot_id)));
+    } elseif (!empty($report_month)) {
+        $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table_name WHERE report_month = %s LIMIT 1", sanitize_text_field($report_month)));
+    } else {
+        $row = null;
+    }
+
+    if (!$row) {
+        return null;
+    }
+
+    $desktop_scores = json_decode($row->desktop_scores, true);
+    $mobile_scores = json_decode($row->mobile_scores, true);
+
+    return [
+        'report_month' => $row->report_month,
+        'sales_amount' => (float) $row->sales_amount,
+        'desktop_scores' => is_array($desktop_scores) ? $desktop_scores : [],
+        'mobile_scores' => is_array($mobile_scores) ? $mobile_scores : [],
+    ];
+}
+
 function business_reports_page()
 {
+    $snapshot = null;
+    $selected_month = !empty($_GET['report_month']) ? sanitize_text_field($_GET['report_month']) : null;
+
+    if (!empty($_GET['snapshot_id'])) {
+        $snapshot = business_report_get_snapshot_data(absint($_GET['snapshot_id']));
+    } elseif ($selected_month) {
+        $snapshot = business_report_get_snapshot_data(null, $selected_month);
+    }
+
+    $report_month = $snapshot['report_month'] ?? $selected_month ?? wp_date('Y-m');
+    $report_date = !empty($report_month) ? date('d/m/Y', strtotime($report_month . '-01')) : date('d/m/Y');
+    $report_sales = $snapshot['sales_amount'] ?? get_monthly_sales($report_month);
+    $desktop_scores = $snapshot['desktop_scores'] ?? [
+        'perf' => get_option('desktop_performace', 0),
+        'acc' => get_option('desktop_accessibility', 0),
+        'bp' => get_option('desktop_best_practices', 0),
+        'seo' => get_option('desktop_seo', 0),
+    ];
+    $mobile_scores = $snapshot['mobile_scores'] ?? [
+        'perf' => get_option('mobile_performace', 0),
+        'acc' => get_option('mobile_accessibility', 0),
+        'bp' => get_option('mobile_best_practices', 0),
+        'seo' => get_option('mobile_seo', 0),
+    ];
     ?>
     <div class="wrapper" style="background: #fff; padding: 10px 30px 30px 30px; margin: 20px;">
         <div style="display: flex;">
@@ -181,8 +237,8 @@ function business_reports_page()
                 <h1>รายงานประสิทธิภาพของเว็บไซต์</h1>
                 <h2><?= esc_html(get_option('website_domain_name')) ?></h2>
                 <h2 style="font-size: 20px;">ยอดขายเดือนนี้: <span
-                        style="color: blue;"><?= number_format(get_current_month_sales()) ?></span> บาท</h2>
-                <p style="font-size: 16px;">วันที่ออกรายงาน: <?= date('d/m/Y') ?> โดย
+                        style="color: blue;"><?= number_format($report_sales) ?></span> บาท</h2>
+                <p style="font-size: 16px;">วันที่ออกรายงาน: <?= esc_html($report_date) ?> โดย
                     <?= esc_html(get_option('developer_name')) ?></p>
             </div>
         </div>
@@ -190,77 +246,77 @@ function business_reports_page()
             <h2>คะแนน Performance บน Desktop</h2>
 
             <h3
-                style="color: <?php if (get_option('desktop_performace') >= 80) {
+                style="color: <?php if ((int) ($desktop_scores['perf'] ?? 0) >= 80) {
                     echo "green";
                 } else {
                     echo "orange";
                 } ?>;">
-                <?= esc_html(get_option('desktop_performace', 0)) ?>/100 | Performace</h3>
+                <?= esc_html((int) ($desktop_scores['perf'] ?? 0)) ?>/100 | Performace</h3>
             <p>วัดตาม ความเร็วของเว็บไซต์ เวลาในการตอบสนอง First Contentful Paint, Largest Contentful Paint, Total Blocking
                 Time, Cumulative Layout Shift และ Speed Index</p>
 
             <h3
-                style="color: <?php if (get_option('desktop_accessibility') >= 80) {
+                style="color: <?php if ((int) ($desktop_scores['acc'] ?? 0) >= 80) {
                     echo "green";
                 } else {
                     echo "orange";
                 } ?>;">
-                <?= esc_html(get_option('desktop_accessibility', 0)) ?>/100 | Accessiblity</h3>
+                <?= esc_html((int) ($desktop_scores['acc'] ?? 0)) ?>/100 | Accessiblity</h3>
             <p>ความยากง่ายในการใช้งาน การจัดวาง โอกาสในการเข้าถึงแอปพลิเคชันบนเว็บ</p>
 
             <h3
-                style="color: <?php if (get_option('desktop_best_practices') >= 80) {
+                style="color: <?php if ((int) ($desktop_scores['bp'] ?? 0) >= 80) {
                     echo "green";
                 } else {
                     echo "orange";
                 } ?>;">
-                <?= esc_html(get_option('desktop_best_practices', 0)) ?>/100 | Best Practices</h3>
+                <?= esc_html((int) ($desktop_scores['bp'] ?? 0)) ?>/100 | Best Practices</h3>
             <p>ความปลอดภัยของเว็บไซต์ การป้องกัน XSS XFO CSP มีการใช้มาตรการ HSTS</p>
 
-            <h3 style="color: <?php if (get_option('desktop_seo') >= 80) {
+            <h3 style="color: <?php if ((int) ($desktop_scores['seo'] ?? 0) >= 80) {
                 echo "green";
             } else {
                 echo "orange";
             } ?>;">
-                <?= esc_html(get_option('desktop_seo', 0)) ?>/100 | SEO</h3>
+                <?= esc_html((int) ($desktop_scores['seo'] ?? 0)) ?>/100 | SEO</h3>
             <p>หน้าเว็บปฏิบัติตามคำแนะนำพื้นฐานเกี่ยวกับการเพิ่มประสิทธิภาพการค้นหา (SEO)</p>
 
             <h2>คะแนน Performance บน Mobile / อุปกรณ์เคลื่อนที่</h2>
 
             <h3
-                style="color: <?php if (get_option('mobile_performace') >= 80) {
+                style="color: <?php if ((int) ($mobile_scores['perf'] ?? 0) >= 80) {
                     echo "green";
                 } else {
                     echo "orange";
                 } ?>;">
-                <?= esc_html(get_option('mobile_performace', 0)) ?>/100 | Performace</h3>
+                <?= esc_html((int) ($mobile_scores['perf'] ?? 0)) ?>/100 | Performace</h3>
             <p>วัดตาม ความเร็วของเว็บไซต์ เวลาในการตอบสนอง First Contentful Paint, Largest Contentful Paint, Total Blocking
                 Time, Cumulative Layout Shift และ Speed Index</p>
 
             <h3
-                style="color: <?php if (get_option('mobile_accessibility') >= 80) {
+                style="color: <?php if ((int) ($mobile_scores['acc'] ?? 0) >= 80) {
                     echo "green";
                 } else {
                     echo "orange";
                 } ?>;">
-                <?= esc_html(get_option('mobile_accessibility', 0)) ?>/100 | Accessiblity</h3>
+                <?= esc_html((int) ($mobile_scores['acc'] ?? 0)) ?>/100 | Accessiblity</h3>
             <p>ความยากง่ายในการใช้งาน การจัดวาง โอกาสในการเข้าถึงแอปพลิเคชันบนเว็บ</p>
 
             <h3
-                style="color: <?php if (get_option('mobile_best_practices') >= 80) {
+                style="color: <?php if ((int) ($mobile_scores['bp'] ?? 0) >= 80) {
                     echo "green";
                 } else {
                     echo "orange";
                 } ?>;">
-                <?= esc_html(get_option('mobile_best_practices', 0)) ?>/100 | Best Practices</h3>
+                <?= esc_html((int) ($mobile_scores['bp'] ?? 0)) ?>/100 | Best Practices</h3>
             <p>ความปลอดภัยของเว็บไซต์ การป้องกัน XSS XFO CSP มีการใช้มาตรการ HSTS</p>
 
-            <h3 style="color: <?php if (get_option('mobile_seo') >= 80) {
+            <h3 style="color: <?php if ((int) ($mobile_scores['seo'] ?? 0) >= 80) {
                 echo "green";
             } else {
                 echo "orange";
             } ?>;">
-                <?= esc_html(get_option('mobile_seo', 0)) ?>/100 | SEO</h3>
+                <?= esc_html((int) ($mobile_scores['seo'] ?? 0)) ?>/100 | SEO</h3>
             <p>หน้าเว็บปฏิบัติตามคำแนะนำพื้นฐานเกี่ยวกับการเพิ่มประสิทธิภาพการค้นหา (SEO)</p>
         </div>
         <style>
@@ -275,28 +331,38 @@ function business_reports_page()
     <?php
 }
 
-function get_current_month_sales() {
-    // ใช้เวลาตาม Timezone ที่ตั้งไว้ใน WordPress
-    $start_date = wp_date( 'Y-m-01 00:00:00' );
-    $end_date   = wp_date( 'Y-m-t 23:59:59' );
+function get_monthly_sales($year_month = null)
+{
+    if (empty($year_month)) {
+        $year_month = wp_date('Y-m');
+    }
+
+    if (!preg_match('/^\d{4}-\d{2}$/', $year_month)) {
+        return 0.0;
+    }
 
     $args = [
         'limit'        => -1,
         'type'         => 'shop_order',
         'status'       => [ 'wc-completed', 'wc-processing' ],
-        'date_created' => $start_date . '...' . $end_date,
         'return'       => 'objects',
     ];
 
-    $orders      = wc_get_orders( $args );
+    $orders      = wc_get_orders($args);
     $total_sales = 0.0;
 
-    foreach ( $orders as $order ) {
-        // ป้องกัน Refund object หรือข้อมูลผิดประเภทหลุดเข้ามา
-        if (
-            ! $order instanceof WC_Order ||
-            $order instanceof WC_Order_Refund
-        ) {
+    foreach ($orders as $order) {
+        if (! $order instanceof WC_Order || $order instanceof WC_Order_Refund) {
+            continue;
+        }
+
+        $created_at = $order->get_date_created();
+        if (! $created_at) {
+            continue;
+        }
+
+        $order_month = $created_at->date_i18n('Y-m');
+        if ($order_month !== $year_month) {
             continue;
         }
 
@@ -306,13 +372,21 @@ function get_current_month_sales() {
         $total_sales += $order_total - $refunded_amount;
     }
 
-    return max( 0, $total_sales );
+    return max(0, $total_sales);
+}
+
+function get_current_month_sales() {
+    return get_monthly_sales(wp_date('Y-m'));
 }
 
 add_filter('admin_title', function ($admin_title, $title) {
     if (isset($_GET['page']) && $_GET['page'] === 'business_reports_print') {
 
-        $current_date = wp_date('d/m/Y');
+        if (!empty($_GET['report_date'])) {
+            $current_date = sanitize_text_field($_GET['report_date']);
+        } else {
+            $current_date = wp_date('d/m/Y');
+        }
 
         return "รายงานประสิทธิภาพเว็บไซต์ " . esc_html(get_option('website_domain_name')) . " วันที่ {$current_date}";
     }
@@ -340,13 +414,11 @@ register_activation_hook(__FILE__, function () {
     dbDelta($sql);
 });
 
-function maybe_save_monthly_snapshot()
+function maybe_save_monthly_snapshot($current_month)
 {
     global $wpdb;
     $table_name = $wpdb->prefix . 'business_reports_snapshots';
-    $current_month = wp_date('Y-m'); // ดึงเดือนปัจจุบันตาม Timezone เว็บ
 
-    // เช็คว่าเดือนนี้มี Snapshot หรือยัง
     $exists = $wpdb->get_var($wpdb->prepare("SELECT id FROM $table_name WHERE report_month = %s", $current_month));
 
     if (!$exists) {
@@ -377,6 +449,30 @@ function maybe_save_monthly_snapshot()
 
 add_action('admin_init', function() {
     if (isset($_GET['page']) && $_GET['page'] === 'business_reports_print') {
-        maybe_save_monthly_snapshot();
+        if (isset($_GET['delete_snapshot_id'])) {
+            $snapshot_id = absint($_GET['delete_snapshot_id']);
+
+            if ($snapshot_id > 0) {
+                $nonce = isset($_GET['_wpnonce']) ? sanitize_text_field(wp_unslash($_GET['_wpnonce'])) : '';
+
+                if (wp_verify_nonce($nonce, 'delete_business_report_snapshot_' . $snapshot_id)) {
+                    global $wpdb;
+                    $table_name = $wpdb->prefix . 'business_reports_snapshots';
+                    $wpdb->delete($table_name, ['id' => $snapshot_id], ['%d']);
+                    wp_safe_redirect(admin_url('admin.php?page=business_reports'));
+                    exit;
+                }
+
+                wp_die('คำขอลบรายงานไม่ถูกต้อง');
+            }
+        }
+
+        if (!empty($_GET['report_month']) && !empty($_GET['snapshot_id'])) {
+            $current_month = sanitize_text_field($_GET['report_month']);
+            maybe_save_monthly_snapshot($current_month);
+        } elseif (!empty($_GET['report_month'])) {
+            $current_month = sanitize_text_field($_GET['report_month']);
+            maybe_save_monthly_snapshot($current_month);
+        }
     }
 });
